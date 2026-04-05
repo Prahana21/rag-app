@@ -80,7 +80,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     }
     res.status(500).json({ error: "Something went wrong!" });
 });
-app.get("/*", (req, res) => {
+app.use((req, res) => {
     res.sendFile(path.join(__dirname, "../client/dist/index.html"));
 });
 const PORT = process.env.PORT || 5000;
