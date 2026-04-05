@@ -15,9 +15,7 @@ app.use(express.static(path.join(__dirname, "../client/dist")));
 
 app.use(cors());
 app.use(express.json())
-app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../client/dist/index.html"));
-});
+
 //creating the uploads folder
 const uploadDir = "uploads";//variable storing the folder name
 if (!fs.existsSync(uploadDir)){
@@ -81,6 +79,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
         return res.status(400).json({ error: `Upload error: ${err.message}` });
     }
     res.status(500).json({ error: "Something went wrong!" });
+});
+app.get("/*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../client/dist/index.html"));
 });
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
