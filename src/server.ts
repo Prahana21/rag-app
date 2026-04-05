@@ -7,10 +7,17 @@ import fs from "fs";//reads/ deletes files from disc
 import { ingestPDF } from "./ingest";//our pdf ingestion pipeline
 import { queryPDF } from "./query";//our question answering pipeline
 
+
+
 dotenv.config()
 const app = express();
+app.use(express.static(path.join(__dirname, "../client/dist")));
+
 app.use(cors());
 app.use(express.json())
+app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+});
 //creating the uploads folder
 const uploadDir = "uploads";//variable storing the folder name
 if (!fs.existsSync(uploadDir)){

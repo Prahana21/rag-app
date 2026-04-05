@@ -5,9 +5,10 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js"
-  },
+    "build": "cd client && npm install && npm run build && cd ..",
+    "start": "node dist/server.js",
+    "compile": "tsc"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
