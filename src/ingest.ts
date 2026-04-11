@@ -5,12 +5,12 @@ import { Pinecone } from "@pinecone-database/pinecone";
 import dotenv from "dotenv"
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import PDFParser from "pdf2json";
-
+import { execSync } from "child_process";
 
 dotenv.config();//loads .env file
 
 // Intialize clients
-const pdf2pic = require("pdf-poppler");
+
 const pinecone = new Pinecone({
     apiKey: process.env.PINECONE_API_KEY!,
 });// creates a connection to our Pinecone database
@@ -72,16 +72,10 @@ export function chunkText(text: string, chunkSize: number = 500, overlap: number
 
 async function extractTextWithOCR(filePath: string): Promise<string> {
     // Step 1: Convert PDF to images
-    const opts = {
-        format: "png",
-        out_dir: "uploads",
-        out_prefix: path.basename(filePath, ".pdf"),
-        page: null
-    };
-    await pdf2pic.convert(filePath, opts);
-
+    
     // Step 2: Find generated images
     const prefix = path.basename(filePath, ".pdf");
+    execSync(`pdftoppm -png "${filePath}" "uploads/${prefix}"`);
     const files = fs.readdirSync("uploads")
         .filter(f => f.startsWith(prefix) && f.endsWith(".png"))
         .sort()
