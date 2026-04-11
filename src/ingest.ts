@@ -5,10 +5,12 @@ import { Pinecone } from "@pinecone-database/pinecone";
 import dotenv from "dotenv"
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import PDFParser from "pdf2json";
+
+
 dotenv.config();//loads .env file
 
 // Intialize clients
-
+const pdf2pic = require("pdf-poppler");
 const pinecone = new Pinecone({
     apiKey: process.env.PINECONE_API_KEY!,
 });// creates a connection to our Pinecone database
@@ -40,7 +42,10 @@ async function extractTextFromPDF(filePath: string, mimeType: string): Promise<s
                 console.log("Sample:", text.substring(0, 100));
 
                 if (!text || text.trim() === "") {
-                    reject(new Error("Could not extract text. Might be a scanned PDF."));
+                    console.log("pdf2json found no text, attempting OCR...");
+                    extractTextWithOCR(filePath)
+                        .then(ocrText => resolve(ocrText))
+                        .catch(err => reject(err));
                     return;
                 }
                 resolve(text);
@@ -52,7 +57,7 @@ async function extractTextFromPDF(filePath: string, mimeType: string): Promise<s
         pdfParser.loadPDF(filePath);
     });
 }
-function chunkText(text: string, chunkSize: number = 500, overlap: number = 50): string[] {
+export function chunkText(text: string, chunkSize: number = 500, overlap: number = 50): string[] {
     let words: string[] = text.split(" ");
     let chunks: string[] = [];
     //Overlap makes sure important sentences that fall at boundaries never get cut off from their context
@@ -63,6 +68,49 @@ function chunkText(text: string, chunkSize: number = 500, overlap: number = 50):
     return chunks;
 }
 
+
+
+async function extractTextWithOCR(filePath: string): Promise<string> {
+    // Step 1: Convert PDF to images
+    const opts = {
+        format: "png",
+        out_dir: "uploads",
+        out_prefix: path.basename(filePath, ".pdf"),
+        page: null
+    };
+    await pdf2pic.convert(filePath, opts);
+
+    // Step 2: Find generated images
+    const prefix = path.basename(filePath, ".pdf");
+    const files = fs.readdirSync("uploads")
+        .filter(f => f.startsWith(prefix) && f.endsWith(".png"))
+        .sort()
+        .map(f => path.join("uploads", f));
+
+    if (files.length === 0) throw new Error("Could not convert PDF to images");
+
+    // Step 3: Send each image to Gemini and extract text
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    let fullText = "";
+
+    for (const file of files) {
+        const imageData = fs.readFileSync(file).toString("base64");
+        const result = await model.generateContent([
+            {
+                inlineData: {
+                    data: imageData,
+                    mimeType: "image/png"
+                }
+            },
+            "Extract all the text from this image exactly as it appears. Return only the text, nothing else."
+        ]);
+        fullText += result.response.text() + "\n";
+        fs.unlinkSync(file); // delete image after reading
+    }
+
+    if (!fullText.trim()) throw new Error("Could not extract any text from PDF");
+    return fullText;
+}
 
 async function getEmbedding(text: string): Promise<number[]> {
     const response = await fetch(
@@ -82,7 +130,7 @@ async function getEmbedding(text: string): Promise<number[]> {
     }
     return data.embedding.values;
 }
-async function embedAndStore(chunks: string[], fileName: string): Promise<void> {
+async function embedAndStore(chunks: string[], fileName: string, userId: string): Promise<void> {
     for (let i = 0; i < chunks.length; i++) {
         const vector = await getEmbedding(chunks[i]);
 
@@ -92,7 +140,8 @@ async function embedAndStore(chunks: string[], fileName: string): Promise<void> 
                 values: vector,
                 metadata: {
                     text: chunks[i],
-                    fileName: fileName
+                    fileName: fileName,
+                    userId: userId
                 }
             }]
         });
@@ -100,7 +149,7 @@ async function embedAndStore(chunks: string[], fileName: string): Promise<void> 
         console.log(`Stored chunk ${i + 1}/${chunks.length}`);
     }
 }
-export async function ingestPDF(filePath: string, mimeType: string): Promise<string> {
+export async function ingestPDF(filePath: string, mimeType: string, userId: string): Promise<string> {
     const fileName = path.basename(filePath)
     console.log(`starting ingestion for: ${fileName}`)
 
@@ -110,7 +159,7 @@ export async function ingestPDF(filePath: string, mimeType: string): Promise<str
     const chunks = chunkText(data)
     console.log(`Split into ${chunks.length} chunks`);
 
-    await embedAndStore(chunks, fileName)
+    await embedAndStore(chunks, fileName, userId)
     console.log(`Ingestion done for ${fileName}`)
     return fileName;//now tells the caller what the file name was since the frontend needs to know filename so it can send it back when asking questions
 }

@@ -29,13 +29,13 @@ async function embedQuestion(question: string): Promise<number[]> {
     }
     return data.embedding.values;
 }
-async function searchPinecone(fileName: string, questionVector: number[], topK: number = 3): Promise<string[]> {
+async function searchPinecone(fileName: string, userId: string, questionVector: number[], topK: number = 3): Promise<string[]> {
     let results = await index.query({
         vector: questionVector,
         topK: topK,
         //searches only chunks from specific pdf
         includeMetadata: true,//very important since this tells pinecone to send that metadata with the results without it we would only get Ids and scores not the actual text
-        filter: { fileName: { $eq: fileName } },
+        filter: { fileName: { $eq: fileName }, userId: { $eq: userId } },
     });
     let answer: string[] = results.matches
         .map(match => match.metadata?.text as string)
@@ -43,7 +43,7 @@ async function searchPinecone(fileName: string, questionVector: number[], topK: 
     //.map() → extracts the text from each match, filter() → removes any undefined or empty strings as string → tells TypeScript this is a string
     return answer;
 }
-async function askGemini(question: string, answer: string[], history: { role: string, content: string }[]): Promise<string> {
+async function askGemini(question: string, answer: string[], history: { role: string, content: string }[], onChunk: (text: string) => void): Promise<void> {
     const prompt = `
 You are an intelligent assistant helping a user understand a document.
 You are given relevant excerpts from the document and a question.
@@ -74,13 +74,17 @@ Answer:`
     const chat = model.startChat({
         history: geminiHistory
     });
-    const result = await chat.sendMessage(prompt);
-    return result.response.text();
+    // stream instead of generate
+    const result = await chat.sendMessageStream(prompt);
+    for await (const chunk of result.stream){
+        const text = chunk.text()
+        if (text) onChunk(text.replace(/\*+/g, ""))// call callback with each peice
+    }
 }
 
-export async function queryPDF(fileName: string, question: string, topK: number, history: {role: string, content: string}[]): Promise<string>{
+export async function queryPDF(fileName: string, question: string, topK: number, history: {role: string, content: string}[], userId: string, onChunk: (text: string) => void): Promise<void>{
     const question_vector: number[] = await embedQuestion(question);
-    const chunks_array = await searchPinecone(fileName, question_vector, topK);
-    const answer = await askGemini(question, chunks_array, history);
-    return answer;
-}
+    const chunks_array = await searchPinecone(fileName, userId, question_vector, topK);
+    await askGemini(question, chunks_array, history, onChunk);
+}   
+

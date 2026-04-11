@@ -6,16 +6,20 @@ import path from "path";// handles file paths across OS
 import fs from "fs";//reads/ deletes files from disc
 import { ingestPDF } from "./ingest";//our pdf ingestion pipeline
 import { queryPDF } from "./query";//our question answering pipeline
-
+import mongoose from "mongoose";
+import authRouter from "./auth";
+import { authMiddleware, AuthRequest } from "./middleware";
 
 
 dotenv.config()
 const app = express();
 app.use(express.static(path.join(__dirname, "../client/dist")));
-
+mongoose.connect(process.env.MONGODB_URI!)
+    .then(() => console.log("MongoDB connected"))
+    .catch((err) => console.error("MongoDB connection error:", err));
 app.use(cors());
 app.use(express.json())
-
+app.use("/auth", authRouter);
 //creating the uploads folder
 const uploadDir = "uploads";//variable storing the folder name
 if (!fs.existsSync(uploadDir)){
@@ -36,12 +40,12 @@ const upload = multer({ storage });// creates the upload middleware using our st
 // when the user hits `POST/upload`, -> upload.single("pdf") runs first -> reads the incoming file from the request
 //->saves it to uploads/ folder using our storage cofig -> attaches file info to req.file -> passes control to next function
 // the /upload route needs to return fileName in the response
-app.post("/upload", upload.single("pdf"), async (req, res) => {
+app.post("/upload", authMiddleware, upload.single("pdf"), async (req: AuthRequest, res) => {
     try {
         if (!req.file || req.file.mimetype !== "application/pdf") return res.status(400).json({ error: "Please upload a valid pdf" });
         const filePath = req.file.path;
         //frontend recieves the filename and stores it-uses it in every question followed
-        const fileName = await ingestPDF(filePath, req.file.mimetype);
+        const fileName = await ingestPDF(filePath, req.file.mimetype, req.userId!);
         fs.unlinkSync(filePath);
         return res.status(200).json({ fileName });
     } catch (error) {
@@ -56,7 +60,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }
     
 })
-app.post("/ask", async (req, res)=>{
+app.post("/ask", authMiddleware, async (req: AuthRequest, res)=>{
     try {
         if (!req.body.question) return res.status(400).json({error: "Please provide a question"});
         const question = req.body.question;
@@ -64,11 +68,21 @@ app.post("/ask", async (req, res)=>{
         const fileName = req.body.fileName;
         const topK = req.body.topK || 3;
         const history = req.body.history || [];// default emoty array for the first message with no history
-        const answer = await queryPDF(fileName, question, topK, history);
-        return res.status(200).json({ answer })
+        
+        //SSE headers - tells browser "this is a stream"
+        res.setHeader("Content-Type", "text/event-stream") // tells browser expect a stream not regular JSON
+        res.setHeader("Cache-Control", "no-cache") // don't cache streaming data
+        res.setHeader("Connection", "keep-alive")//keep connection open until we call res.end()
+        await queryPDF(fileName, question, topK, history, req.userId!, (text) => {
+            res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`)
+        })
+
+        res.write(`data: [DONE]\n\n`)
+        res.end()
     }catch (error){
         console.error("Query error:", error); 
-        res.status(500).json({ error: "something went wrong"})
+        res.write(`data: ${JSON.stringify({ error: "Something went wrong" })}\n\n`)
+        res.end()
     }
     
 

@@ -2,6 +2,6 @@ services:
   - type: web
     name: rag-app
     env: node
-    buildCommand: npm install && npx tsc && cd client && npm install && npm run build && cd ..
+    buildCommand: apt-get install -y poppler-utils && npm install && npx tsc && cd client && npm install && npm run build && cd ..
     startCommand: npm start
     
