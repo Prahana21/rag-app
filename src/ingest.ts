@@ -50,7 +50,10 @@ async function extractTextFromPDF(filePath: string, mimeType: string): Promise<s
                 }
                 resolve(text);
             } catch (err) {
-                reject(new Error("Error processing PDF data"));
+                console.log("pdf2json traversal failed, attempting OCR...");
+                extractTextWithOCR(filePath)
+                   .then(ocrText => resolve(ocrText))
+                   .catch(ocrErr => reject(ocrErr));
             }
         });
 
